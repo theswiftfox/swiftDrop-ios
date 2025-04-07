@@ -1,0 +1,13 @@
+## xcodebuild dir
+.build/
+
+
+
+## User settings
+xcuserdata/
+
+### OSX ###
+# General
+.DS_Store
+.AppleDouble
+.LSOverride
