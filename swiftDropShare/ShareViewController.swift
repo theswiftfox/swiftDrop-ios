@@ -95,7 +95,26 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
         if let device = selectedDevice, let fileURL = fileURL {
             print("Sending file...")
             DispatchQueue.global(qos: .userInitiated).async {
-                self.sendFile(fileURL, to: device)
+                do {
+                    try self.sendFile(fileURL, to: device)
+                    return
+                } catch SwiftDropError.generic(let message) {
+                    self.showAlert(with: message)
+                } catch {
+                    self.showAlert(with: "Unknown error occurred: \(error)")
+                }
+                
+                if device.state == .connected {
+                    self.swiftDrop.disconnect(device: device)
+                }
+                
+                DispatchQueue.main.async {
+                    self.shareButton.isEnabled = true
+                    
+                    self.progressView.isHidden = true
+                    self.progressTitle.isHidden = true
+                    self.progressValue.isHidden = true
+                }
             }
         } else {
             print("DBG: Device \(String(describing: selectedDevice)) or file URL \(String(describing: fileURL)) is nil")
@@ -126,10 +145,12 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
     
     // MARK: - File Transfer
     
-    func sendFile(_ fileURL: URL, to device: CBPeripheral) {
+    func sendFile(_ fileURL: URL, to device: CBPeripheral) throws {
         DispatchQueue.main.async {
             self.shareButton.isEnabled = false
         }
+        
+        self.swiftDrop.toggleScanning()
         
         self.swiftDrop.connect(device: device)
         
@@ -137,21 +158,13 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
         do {
             fileData = try (Data(contentsOf: fileURL))
         } catch {
-            showAlert(with: "Unable to open file: \(error)")
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Unable to open file: \(error)")
         }
         let compressed: Data
         do {
             compressed = try (fileData as NSData).compressed(using: .lzma) as Data
         } catch {
-            showAlert(with: "Unable to compress data before sending. \(error)")
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Unable to compress data before sending. \(error)")
         }
         
         let hash = SHA256.hash(data: compressed)
@@ -168,11 +181,7 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
         
         
         if device.state != .connected {
-            self.showAlert(with: "Unable to connect after 10s")
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Unable to connect after 10s")
         }
         
         let l2capChannel = L2CapChannelDelegate()
@@ -190,12 +199,7 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
 
         
         if !l2capChannel.connected() {
-            showAlert(with: "Unable to open L2CAP channel after 10s")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Unable to open L2CAP channel after 10s")
         }
         
         Thread.sleep(forTimeInterval: 0.2)
@@ -204,42 +208,22 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
         do {
             try l2capChannel.writeBytes(Array(CLIENT_HELLO))
         } catch {
-            showAlert(with: "Handshake failed.")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Handshake failed.")
         }
         
         var bytes: [UInt8]
         do {
             bytes = try l2capChannel.readBytes()
         } catch {
-            showAlert(with: "Unable to read handshake response: \(error)")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Unable to read handshake response: \(error)")
         }
 
         if bytes.count != SERVER_HELLO.count {
-            showAlert(with: "Handshake response length invalid.")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Handshake response length invalid.")
         }
         
         if bytes != Array(SERVER_HELLO) {
-            showAlert(with: "Handshake response was invalid.")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Handshake response was invalid.")
         }
         
         let chunkLength = l2capChannel.mtu - 1 - 50 // 1 byte reserved for msg id
@@ -255,42 +239,23 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
         do {
             jsonData = try JSONEncoder().encode(metadata)
         } catch {
-            showAlert(with: "Unable to serialize metadata to JSON.")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Unable to serialize metadata to JSON.")
         }
         
         do {
             try l2capChannel.writeBytes([METADATA_ID] + ([UInt8](jsonData)))
         } catch {
-            showAlert(with: "Failed to send Metadata: \(error)")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Failed to send Metadata: \(error)")
         }
         
         // metadata ack
         do {
             let bytes = try l2capChannel.readBytes()
             if bytes.first != SERVER_ACK || bytes.count > 1 {
-                showAlert(with: "Unexpected server response on Metadata send.")
-                self.swiftDrop.disconnect(device: device)
-                DispatchQueue.main.async {
-                    self.shareButton.isEnabled = true
-                }
-                return
+                throw SwiftDropError.generic(message: "Unexpected server response on Metadata send.")
             }
         } catch {
-            showAlert(with: "Did not receive Metadata ACK")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-            }
+            throw SwiftDropError.generic(message: "Did not receive Metadata ACK")
         }
         
         DispatchQueue.main.async {            
@@ -317,16 +282,7 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
                 // wait for server to ack the chunk
                 let bytes = try l2capChannel.readBytes()
                 if bytes.first != SERVER_ACK || bytes.count > 1 {
-                    showAlert(with: "Transfer failed: Unexpected server response.")
-                    self.swiftDrop.disconnect(device: device)
-                    DispatchQueue.main.async {
-                        self.shareButton.isEnabled = true
-                        
-                        self.progressView.isHidden = true
-                        self.progressTitle.isHidden = true
-                        self.progressValue.isHidden = true
-                    }
-                    return
+                    throw SwiftDropError.generic(message: "Transfer failed: Unexpected server response.")
                 }
                 
                 DispatchQueue.main.async {
@@ -342,28 +298,10 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
             // wait for an ack before exiting to ensure message has been sent.
             let bytes = try l2capChannel.readBytes()
             if bytes.first != SERVER_ACK || bytes.count > 1 {
-                showAlert(with: "Transfer failed: Unexpected server response.")
-                self.swiftDrop.disconnect(device: device)
-                DispatchQueue.main.async {
-                    self.shareButton.isEnabled = true
-                    
-                    self.progressView.isHidden = true
-                    self.progressTitle.isHidden = true
-                    self.progressValue.isHidden = true
-                }
-                return
+                throw SwiftDropError.generic(message: "Transfer failed: Unexpected server response.")
             }
         } catch {
-            showAlert(with: "Transfer failed. Connection closed.")
-            self.swiftDrop.disconnect(device: device)
-            DispatchQueue.main.async {
-                self.shareButton.isEnabled = true
-                
-                self.progressView.isHidden = true
-                self.progressTitle.isHidden = true
-                self.progressValue.isHidden = true
-            }
-            return
+            throw SwiftDropError.generic(message: "Transfer failed. Connection closed.")
         }
         
         self.swiftDrop.disconnect(device: device)
@@ -374,7 +312,7 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
             self.progressValue.isHidden = true
             
             let alertController = UIAlertController(title: "Transfer Complete", message: "File sent successfully!", preferredStyle: .alert)
-            let okAction = UIAlertAction(title: "OK", style: .default, handler: { _ in 
+            let okAction = UIAlertAction(title: "OK", style: .default, handler: { _ in
                 self.extensionContext!.completeRequest(returningItems: [], completionHandler: nil)
             })
             alertController.addAction(okAction)

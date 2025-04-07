@@ -21,6 +21,10 @@ let TRANSFER_COMPLETE_ID: UInt8 = 0xFF
 
 let SERVER_ACK: UInt8 = 0xAC
 
+enum SwiftDropError: Swift.Error {
+    case generic(message: String)
+}
+
 class MetaData : Codable {
     let filename: String
     let checksum: String
@@ -70,6 +74,16 @@ class SwiftDrop: NSObject {
     public func disconnect(device: CBPeripheral) {
         self.centralCon.cancelPeripheralConnection(device)
     }
+    
+    public func toggleScanning() {
+        if self.centralCon.isScanning {
+            self.centralCon.stopScan()
+        } else {
+            self.centralCon.scanForPeripherals(withServices: [SERVICE_UUID], options: [
+                CBCentralManagerScanOptionAllowDuplicatesKey: true,
+            ])
+        }
+    }
 }
 
 extension SwiftDrop: CBCentralManagerDelegate {
@@ -108,6 +122,18 @@ extension SwiftDrop: CBCentralManagerDelegate {
             }
         }
     }
+    
+    public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("Connected to \(peripheral.name ?? "Unknown")")
+    }
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: (any Swift.Error)?) {
+        if let error = error {
+            print("Disconnect \(peripheral.name ?? "Unknown") failed: \(error)")
+        } else {
+            print("Disconnected from \(peripheral.name ?? "Unknown")")
+        }
+    }
+    
 }
 
 class L2CapChannelDelegate : NSObject, CBPeripheralDelegate, StreamDelegate {
