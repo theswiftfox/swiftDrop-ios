@@ -198,6 +198,8 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
             return
         }
         
+        Thread.sleep(forTimeInterval: 0.2)
+        
         // CLIENT_HELLO -> SERVER_HELLO
         do {
             try l2capChannel.writeBytes(Array(CLIENT_HELLO))
@@ -240,7 +242,7 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
             return
         }
         
-        let chunkLength = l2capChannel.mtu - 1 // 1 byte reserved for msg id
+        let chunkLength = l2capChannel.mtu - 1 - 50 // 1 byte reserved for msg id
         
         var chunkCount = compressed.count / chunkLength
         if compressed.count % chunkLength != 0 {
@@ -372,11 +374,11 @@ class ShareViewController: UIViewController, UITableViewDataSource, UITableViewD
             self.progressValue.isHidden = true
             
             let alertController = UIAlertController(title: "Transfer Complete", message: "File sent successfully!", preferredStyle: .alert)
-            let okAction = UIAlertAction(title: "OK", style: .default, handler: nil)
-            alertController.addAction(okAction)
-            self.present(alertController, animated: true, completion: {
+            let okAction = UIAlertAction(title: "OK", style: .default, handler: { _ in 
                 self.extensionContext!.completeRequest(returningItems: [], completionHandler: nil)
             })
+            alertController.addAction(okAction)
+            self.present(alertController, animated: true, completion: nil)
         }
     }
     

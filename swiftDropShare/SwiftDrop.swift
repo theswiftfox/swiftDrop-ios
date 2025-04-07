@@ -159,7 +159,7 @@ class L2CapChannelDelegate : NSObject, CBPeripheralDelegate, StreamDelegate {
         self.inputStream?.schedule(in: RunLoop.current, forMode: .default)
         self.outputStream?.schedule(in: RunLoop.current, forMode: .default)
         
-        self.mtu = peripheral.maximumWriteValueLength(for: .withoutResponse)
+        self.mtu = peripheral.maximumWriteValueLength(for: .withResponse)
         self.buffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: mtu)
     }
     
